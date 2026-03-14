@@ -122,6 +122,26 @@
     </style>
 </head>
 <body>
+    <script>
+// 偵測是否為 LINE 內建瀏覽器
+if (navigator.userAgent.indexOf('Line') > -1 || navigator.userAgent.indexOf('NAVER') > -1) {
+    // 取得目前網址
+    var currentUrl = window.location.href;
+    
+    // 建立一個提示橫幅
+    var div = document.createElement('div');
+    div.id = 'line-tip';
+    div.style.cssText = 'position:fixed; bottom:0; left:0; width:100%; background:#ffdddd; color:#333; text-align:center; padding:15px; font-size:16px; z-index:9999; border-top:2px solid red;';
+    
+    // 製作一個「用Chrome開啟」的按鈕 (intent:// 語法適用於Android)
+    // 這個連結會嘗試用外部瀏覽器開啟
+    div.innerHTML = '偵測到您使用LINE瀏覽器，部分功能可能無法使用。<br>\
+                     <a href="' + currentUrl + '" style="display:inline-block; background:#4CAF50; color:white; padding:10px 20px; text-decoration:none; border-radius:5px; margin-top:5px;" onclick="location.href=\'intent://' + currentUrl.replace(/^https?:\/\//, '') + '#Intent;scheme=http;package=com.android.chrome;end\'; return false;">使用 Chrome 開啟</a>\
+                     <br><small>或點選右上角「...」選擇瀏覽器開啟</small>';
+    
+    document.body.appendChild(div);
+}
+</script>
 <div id="container">
     <video id="camera" autoplay playsinline></video>
 
