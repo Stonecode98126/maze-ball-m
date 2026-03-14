@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>迷宮體感滾球</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; user-select:none; -webkit-tap-highlight-color:transparent; }
+        body { width:100vw; height:100vh; overflow:hidden; background:#000; touch-action:none; }
+        #container { position:relative; width:100%; height:100%; }
+
+        /* 相機背景 */
+        #camera { position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; z-index:1; }
+
+        /* ── 旋轉包裝層：整個迷宮跟著指北針轉 ── */
+        #mazeWrapper {
+            position:absolute; top:0; left:0; width:100%; height:100%;
+            z-index:2; pointer-events:none;
+            transform-origin: center center;
+            will-change: transform;
+            transition: transform 0.12s linear;   /* 平滑緩動 */
+        }
+        #ballCanvas { position:absolute; top:0; left:0; width:100%; height:100%; }
+        #fwCanvas   { position:absolute; top:0; left:0; width:100%; height:100%; z-index:3; pointer-events:none; }
+
+        /* 指北針 UI（右下角，固定不隨迷宮轉） */
+        #compass {
+            position:absolute; bottom:90px; right:20px;
+            width:54px; height:54px; z-index:6; pointer-events:none;
+        }
+        #compass svg { width:100%; height:100%; filter:drop-shadow(0 2px 6px rgba(0,0,0,0.7)); }
+
+        button {
+            background:rgba(255,255,255,0.92); border:none; border-radius:50px;
+            padding:14px 30px; font-size:1.1rem; font-weight:bold; color:#1e293b;
+            box-shadow:0 4px 20px rgba(0,0,0,0.5); backdrop-filter:blur(5px);
+            border:1px solid rgba(255,255,255,0.4); cursor:pointer;
+            transition:transform 0.1s, opacity 0.2s;
+        }
+        button:active { transform:scale(0.95); }
+        button:disabled { opacity:0.5; transform:none; }
+        #controls { position:absolute; bottom:30px; left:0; width:100%; text-align:center; z-index:7; }
+
+        .debug {
+            position:absolute; top:16px; left:16px; color:#fff;
+            background:rgba(0,0,0,0.58); padding:8px 14px; border-radius:30px;
+            font-family:'Courier New',monospace; font-size:12px; z-index:8;
+            pointer-events:none; backdrop-filter:blur(3px);
+            border:1px solid rgba(255,255,255,0.18); text-shadow:1px 1px 2px #000;
+            max-width:58vw;
+        }
+        #levelBadge {
+            position:absolute; top:16px; right:16px; color:#fff;
+            padding:8px 16px; border-radius:30px;
+            font-family:'Courier New',monospace; font-size:15px; font-weight:bold;
+            z-index:8; pointer-events:none; backdrop-filter:blur(3px);
+            border:1px solid rgba(255,255,255,0.25);
+            text-shadow:1px 1px 2px rgba(0,0,0,0.6);
+            transition:background 0.5s;
+        }
+        #tierBanner {
+            position:absolute; top:50%; left:50%;
+            transform:translate(-50%,-50%) scale(0.7);
+            color:#fff; font-size:1.7rem; font-weight:bold; text-align:center;
+            background:rgba(0,0,0,0.78); padding:18px 36px; border-radius:20px;
+            z-index:14; pointer-events:none; opacity:0;
+            transition:opacity 0.35s, transform 0.35s;
+            border:2px solid rgba(255,255,255,0.3); backdrop-filter:blur(6px);
+            white-space:pre-line;
+        }
+        #tierBanner.show { opacity:1; transform:translate(-50%,-50%) scale(1); }
+
+        #winOverlay {
+            display:none; position:absolute; top:0; left:0;
+            width:100%; height:100%; background:rgba(0,0,0,0.58);
+            z-index:10; justify-content:center; align-items:center;
+            flex-direction:column; gap:18px;
+        }
+        #winOverlay.show { display:flex; }
+        #winOverlay h1 {
+            font-size:2.8rem; color:#22c55e;
+            text-shadow:0 0 28px #22c55e,0 0 56px #22c55e;
+            animation:pulse 0.55s ease-in-out infinite alternate;
+        }
+        #winOverlay p { color:#fff; font-size:1.15rem; text-align:center; max-width:85vw; }
+        #nextBtn {
+            font-size:1.1rem; padding:14px 36px;
+            background:#22c55e; color:#fff; border-radius:50px;
+            box-shadow:0 0 20px rgba(34,197,94,0.6);
+        }
+        #clearOverlay {
+            display:none; position:absolute; top:0; left:0;
+            width:100%; height:100%; z-index:20;
+            justify-content:center; align-items:center; flex-direction:column;
+            gap:22px; padding:30px;
+            background:linear-gradient(135deg,#0f172a 0%,#1e3a2f 50%,#0f172a 100%);
+        }
+        #clearOverlay.show { display:flex; }
+        #clearOverlay .trophy { font-size:5rem; animation:bounce 0.8s ease-in-out infinite alternate; }
+        #clearOverlay h1 {
+            font-size:2.4rem; color:#fde047; text-align:center;
+            text-shadow:0 0 30px #fde047,0 0 60px rgba(253,224,71,0.4);
+            animation:pulse 0.7s ease-in-out infinite alternate;
+        }
+        #clearOverlay p { color:#d1fae5; font-size:1.05rem; text-align:center; max-width:85vw; line-height:1.65; }
+        #shopBtn {
+            font-size:1.25rem; padding:18px 42px;
+            background:linear-gradient(135deg,#ee4d2d,#ff7337);
+            color:#fff; border-radius:50px;
+            box-shadow:0 0 30px rgba(238,77,45,0.7);
+            border:none; cursor:pointer;
+            animation:glow 1.2s ease-in-out infinite alternate;
+            text-decoration:none; display:inline-block; font-weight:bold;
+        }
+        .stars { font-size:2rem; letter-spacing:4px; }
+        @keyframes pulse  { from{transform:scale(1)} to{transform:scale(1.07)} }
+        @keyframes bounce { from{transform:translateY(0)} to{transform:translateY(-14px)} }
+        @keyframes glow {
+            from{box-shadow:0 0 20px rgba(238,77,45,0.6)}
+            to  {box-shadow:0 0 50px rgba(255,115,55,1),0 0 90px rgba(238,77,45,0.5)}
+        }
+    </style>
+</head>
+<body>
+<div id="container">
+    <video id="camera" autoplay playsinline></video>
+
+    <!-- 迷宮旋轉包裝層 -->
+    <div id="mazeWrapper">
+        <canvas id="ballCanvas"></canvas>
+    </div>
+
+    <!-- 煙火固定不旋轉 -->
+    <canvas id="fwCanvas"></canvas>
+
+    <!-- 指北針 UI -->
+    <div id="compass">
+        <svg viewBox="0 0 54 54" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="27" cy="27" r="26" fill="rgba(0,0,0,0.55)" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/>
+            <!-- 刻度環 -->
+            <circle cx="27" cy="27" r="22" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="0.8"/>
+            <!-- N S W E 字母 -->
+            <text x="27" y="9"  text-anchor="middle" fill="#ff4444" font-size="7" font-weight="bold" font-family="Arial">N</text>
+            <text x="27" y="49" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="6" font-family="Arial">S</text>
+            <text x="7"  y="30" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="6" font-family="Arial">W</text>
+            <text x="47" y="30" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="6" font-family="Arial">E</text>
+            <!-- 指針（會被 JS 旋轉） -->
+            <g id="compassNeedle" transform="rotate(0,27,27)">
+                <!-- 北針：紅 -->
+                <polygon points="27,6 29.5,27 27,24 24.5,27" fill="#ff4444"/>
+                <!-- 南針：白 -->
+                <polygon points="27,48 29.5,27 27,30 24.5,27" fill="rgba(255,255,255,0.85)"/>
+                <circle cx="27" cy="27" r="2.5" fill="#fff" stroke="#ccc" stroke-width="0.8"/>
+            </g>
+        </svg>
+    </div>
+
+    <div class="debug" id="debug">⚙️ 初始化迷宮⋯⋯</div>
+    <div id="levelBadge">關卡 1 / 9</div>
+    <div id="tierBanner">🌱 初級迷宮</div>
+
+    <div id="controls">
+        <button id="startBtn">📷 啟動相機 ＋ 體感迷宮</button>
+    </div>
+
+    <div id="winOverlay">
+        <h1>🎉 過關！</h1>
+        <p id="winMsg">第 1 關完成</p>
+        <p id="winHint" style="font-size:0.95rem;color:#86efac;margin-top:-6px;"></p>
+        <button id="nextBtn">▶ 下一關</button>
+    </div>
+
+    <div id="clearOverlay">
+        <div class="trophy">🏆</div>
+        <h1>全關卡破關！</h1>
+        <div class="stars">⭐⭐⭐⭐⭐</div>
+        <p>恭喜你完成全部 9 關迷宮挑戰！<br>你已是最強滾球大師 🎮<br><br>點擊下方前往獎勵商城 🛍️</p>
+        <a id="shopBtn" href="https://shopee.tw" target="_blank" rel="noopener">🛒 前往蝦皮購物</a>
+        <button id="restartBtn" style="background:rgba(255,255,255,0.12);color:#d1fae5;border:1px solid rgba(255,255,255,0.25);font-size:0.95rem;padding:10px 24px;margin-top:-6px;">↩ 重新挑戰</button>
+    </div>
+</div>
+
+<script>
+(function () {
+
+// ─── DOM ──────────────────────────────────────────────────────────────────────
+const video        = document.getElementById('camera');
+const mazeWrapper  = document.getElementById('mazeWrapper');
+const canvas       = document.getElementById('ballCanvas');
+const fwCanvas     = document.getElementById('fwCanvas');
+const ctx          = canvas.getContext('2d');
+const fwCtx        = fwCanvas.getContext('2d');
+const compassNeedle= document.getElementById('compassNeedle');
+const startBtn     = document.getElementById('startBtn');
+const debug        = document.getElementById('debug');
+const levelBadge   = document.getElementById('levelBadge');
+const winOverlay   = document.getElementById('winOverlay');
+const winMsg       = document.getElementById('winMsg');
+const winHint      = document.getElementById('winHint');
+const nextBtn      = document.getElementById('nextBtn');
+const tierBanner   = document.getElementById('tierBanner');
+const clearOverlay = document.getElementById('clearOverlay');
+const restartBtn   = document.getElementById('restartBtn');
+
+// ─── 難度表 ────────────────────────────────────────────────────────────────────
+const TIERS = [
+    { maxLv:3, rows:12, cols:12, radius:0.030, label:'初級迷宮 🌱', badge:'rgba(34,197,94,0.82)',  wallColor:'rgba(255,255,255,0.88)', ballColor:'#22c55e', glow:'rgba(34,197,94,0.85)'  },
+    { maxLv:6, rows:15, cols:15, radius:0.022, label:'進階迷宮 🔥', badge:'rgba(234,179,8,0.85)',  wallColor:'rgba(255,220,80,0.85)',  ballColor:'#f59e0b', glow:'rgba(245,158,11,0.85)' },
+    { maxLv:9, rows:18, cols:18, radius:0.016, label:'地獄迷宮 💀', badge:'rgba(220,38,38,0.88)',  wallColor:'rgba(255,100,100,0.88)', ballColor:'#ef4444', glow:'rgba(239,68,68,0.88)'  },
+];
+const MAX_LEVELS = 9;
+function getTier(lv) { return lv<=3?TIERS[0]:lv<=6?TIERS[1]:TIERS[2]; }
+
+// ─── 狀態 ─────────────────────────────────────────────────────────────────────
+let currentLevel=1, mazeRows=12, mazeCols=12;
+let vWalls=[], hWalls=[], wallSegs=[];
+let offX=0, offY=0, cSz=0;
+
+const ACCEL=0.13, FRIC=0.94, MSPD=0.007, BOUNCE=0.25, SUBS=6;
+let ball={ x:0.5, y:0.5, vx:0, vy:0, radius:0.030 };
+
+// 傾斜（用於物理加速度）
+let tiltX=0, tiltY=0;
+// 指北針偏航角（度，0=北，順時針增加）
+let heading=0;          // 平滑後的顯示值
+let rawHeading=null;    // 原始值
+let sensorsOn=false, goalDone=false;
+let cW=window.innerWidth, cH=window.innerHeight;
+
+// ─── 煙火 ─────────────────────────────────────────────────────────────────────
+let fwPts=[], fwOn=false;
+function launchFireworks() {
+    fwOn=true; fwPts=[];
+    const cols=['#fde047','#22c55e','#38bdf8','#f472b6','#fb923c','#a78bfa'];
+    for(let b=0;b<9;b++){
+        const bx=cW*0.15+Math.random()*cW*0.7, by=cH*0.1+Math.random()*cH*0.55;
+        const c=cols[b%cols.length];
+        for(let p=0;p<45;p++){
+            const a=Math.random()*Math.PI*2,spd=1.2+Math.random()*4;
+            fwPts.push({x:bx,y:by,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,alpha:1,c,r:1.5+Math.random()*3});
+        }
+    }
+}
+function tickFireworks(){
+    if(!fwOn) return;
+    fwCtx.clearRect(0,0,cW,cH);
+    let alive=false;
+    for(const p of fwPts){
+        p.x+=p.vx;p.y+=p.vy;p.vy+=0.07;p.alpha-=0.012;
+        if(p.alpha>0){alive=true;fwCtx.globalAlpha=p.alpha;fwCtx.beginPath();fwCtx.arc(p.x,p.y,p.r,0,Math.PI*2);fwCtx.fillStyle=p.c;fwCtx.fill();}
+    }
+    fwCtx.globalAlpha=1;
+    if(!alive){fwOn=false;fwCtx.clearRect(0,0,cW,cH);}
+}
+
+// ─── Audio ────────────────────────────────────────────────────────────────────
+let actx=null;
+function ensureAudio(){if(!actx)actx=new(window.AudioContext||window.webkitAudioContext)();}
+function beep(notes,vol=0.3,type='sine',gap=0.12){
+    ensureAudio();
+    notes.forEach((f,i)=>{
+        const o=actx.createOscillator(),g=actx.createGain();
+        o.connect(g);g.connect(actx.destination);o.type=type;o.frequency.value=f;
+        const t=actx.currentTime+i*gap;
+        g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+0.04);g.gain.exponentialRampToValueAtTime(0.001,t+0.42);
+        o.start(t);o.stop(t+0.46);
+    });
+}
+function playWin()  {beep([523.25,659.25,783.99,1046.50]);}
+function playClear(){beep([523.25,587.33,659.25,698.46,783.99,880,987.77,1046.50],0.25,'triangle',0.1);}
+
+// ─── 迷宮生成（DFS 回溯）──────────────────────────────────────────────────────
+function buildMaze(rows,cols){
+    const V=Array(rows).fill().map(()=>Array(cols+1).fill(true));
+    const H=Array(rows+1).fill().map(()=>Array(cols).fill(true));
+    const vis=Array(rows).fill().map(()=>Array(cols).fill(false));
+    const D=[
+        {dr:-1,dc:0,t:'h',wr:r=>r,  wc:c=>c  },
+        {dr:0,dc:1, t:'v',wr:r=>r,  wc:c=>c+1},
+        {dr:1,dc:0, t:'h',wr:r=>r+1,wc:c=>c  },
+        {dr:0,dc:-1,t:'v',wr:r=>r,  wc:c=>c  },
+    ];
+    const stk=[{r:0,c:0}]; vis[0][0]=true;
+    while(stk.length){
+        const {r,c}=stk[stk.length-1];
+        const nb=D.filter(d=>{const nr=r+d.dr,nc=c+d.dc;return nr>=0&&nr<rows&&nc>=0&&nc<cols&&!vis[nr][nc];}).map(d=>({nr:r+d.dr,nc:c+d.dc,d}));
+        if(nb.length){
+            const {nr,nc,d}=nb[Math.floor(Math.random()*nb.length)];
+            d.t==='v'?V[r][d.wc(c)]=false:H[d.wr(r)][c]=false;
+            vis[nr][nc]=true; stk.push({r:nr,c:nc});
+        } else stk.pop();
+    }
+    H[rows][cols-1]=false; // 終點出口
+    return {V,H};
+}
+
+// ─── 佈局 ─────────────────────────────────────────────────────────────────────
+function layout(){
+    const m=Math.min(cW,cH)*0.9;
+    cSz=Math.min(m/mazeCols,m/mazeRows);
+    offX=(cW-cSz*mazeCols)/2; offY=(cH-cSz*mazeRows)/2;
+}
+function buildSegs(){
+    wallSegs=[];
+    for(let r=0;r<mazeRows;r++) for(let c=0;c<=mazeCols;c++)
+        if(vWalls[r][c]) wallSegs.push({x1:offX+c*cSz,y1:offY+r*cSz,x2:offX+c*cSz,y2:offY+(r+1)*cSz});
+    for(let r=0;r<=mazeRows;r++) for(let c=0;c<mazeCols;c++)
+        if(hWalls[r][c]) wallSegs.push({x1:offX+c*cSz,y1:offY+r*cSz,x2:offX+(c+1)*cSz,y2:offY+r*cSz});
+}
+function resetBall(){ball.x=(offX+cSz*0.5)/cW;ball.y=(offY+cSz*0.5)/cH;ball.vx=ball.vy=0;}
+
+function resize(){
+    cW=window.innerWidth;cH=window.innerHeight;
+    canvas.width=cW;canvas.height=cH;
+    fwCanvas.width=cW;fwCanvas.height=cH;
+    if(vWalls.length){layout();buildSegs();resetBall();}
+    draw();
+}
+window.addEventListener('resize',resize);
+
+// ─── 初始化關卡 ───────────────────────────────────────────────────────────────
+function initLevel(){
+    goalDone=false;fwOn=false;fwCtx.clearRect(0,0,cW,cH);
+    const t=getTier(currentLevel);
+    mazeRows=t.rows;mazeCols=t.cols;ball.radius=t.radius;
+    const {V,H}=buildMaze(mazeRows,mazeCols);
+    vWalls=V;hWalls=H;
+    layout();buildSegs();resetBall();
+    levelBadge.textContent=`關卡 ${currentLevel} / ${MAX_LEVELS}`;
+    levelBadge.style.background=t.badge;
+    debug.innerHTML=`第 ${currentLevel} 關 (${mazeRows}×${mazeCols})`;
+}
+
+// ─── 橫幅 ─────────────────────────────────────────────────────────────────────
+let bannerTimer=null;
+function showBanner(txt){
+    if(bannerTimer)clearTimeout(bannerTimer);
+    tierBanner.textContent=txt; tierBanner.classList.add('show');
+    bannerTimer=setTimeout(()=>tierBanner.classList.remove('show'),2400);
+}
+
+// ─── 指北針旋轉 ───────────────────────────────────────────────────────────────
+// 平滑 heading（角度插值，處理 0°/360° 跨越）
+function lerpAngle(cur,target,t){
+    let diff=((target-cur+540)%360)-180;
+    return cur+diff*t;
+}
+
+function applyCompassRotation(){
+    if(rawHeading===null) return;
+    // 平滑
+    heading=lerpAngle(heading,rawHeading,0.08);
+
+    // 迷宮旋轉：手機朝北時 heading≈0，地圖不轉
+    // 指北針背景固定，指針反向旋轉（讓 N 始終指向真北）
+    mazeWrapper.style.transform=`rotate(${heading}deg)`;
+    compassNeedle.setAttribute('transform',`rotate(${-heading},27,27)`);
+}
+
+// ─── 碰撞輔助 ─────────────────────────────────────────────────────────────────
+function dSeg(px,py,x1,y1,x2,y2){
+    const dx=x2-x1,dy=y2-y1,l2=dx*dx+dy*dy;
+    const t=l2>1e-12?Math.max(0,Math.min(1,((px-x1)*dx+(py-y1)*dy)/l2)):0;
+    const px2=x1+t*dx,py2=y1+t*dy;
+    return{dist:Math.hypot(px-px2,py-py2),px2,py2};
+}
+
+// ─── 物理更新 ─────────────────────────────────────────────────────────────────
+// 關鍵：tiltX/tiltY 是設備座標系下的傾斜。
+// 由於迷宮已旋轉 heading 度，重力相對於迷宮需要反轉 heading，
+// 讓滾球在「迷宮內」的加速方向永遠正確。
+function physics(){
+    if(!sensorsOn||goalDone) return;
+
+    // 把傾斜向量旋轉 -heading，轉換到迷宮座標系
+    const rad=-heading*Math.PI/180;
+    const cos=Math.cos(rad), sin=Math.sin(rad);
+    const ax=Math.min(90,Math.max(-90,tiltX))/90*ACCEL;
+    const ay=Math.min(90,Math.max(-90,tiltY))/90*ACCEL;
+    // 旋轉加速度向量
+    const mazeAx= ax*cos - ay*sin;
+    const mazeAy= ax*sin + ay*cos;
+
+    ball.vx=ball.vx*FRIC+mazeAx;
+    ball.vy=ball.vy*FRIC+mazeAy;
+    const spd=Math.hypot(ball.vx,ball.vy);
+    if(spd>MSPD){ball.vx=ball.vx/spd*MSPD;ball.vy=ball.vy/spd*MSPD;}
+
+    const rPx=Math.min(cW,cH)*ball.radius;
+    const dt=1/SUBS;
+    for(let s=0;s<SUBS;s++){
+        let nx=ball.x*cW+ball.vx*cW*dt, ny=ball.y*cH+ball.vy*cH*dt;
+        for(let it=0;it<3;it++){
+            let hit=false;
+            for(const sg of wallSegs){
+                const{dist,px2,py2}=dSeg(nx,ny,sg.x1,sg.y1,sg.x2,sg.y2);
+                if(dist<rPx){
+                    hit=true;
+                    let ex=nx-px2,ey=ny-py2,el=Math.hypot(ex,ey);
+                    if(el<1e-6){ex=1;ey=0;}else{ex/=el;ey/=el;}
+                    nx+=ex*(rPx-dist);ny+=ey*(rPx-dist);
+                    const vp=ball.vx*ex+ball.vy*ey;
+                    if(vp<0){ball.vx-=(1+BOUNCE)*vp*ex;ball.vy-=(1+BOUNCE)*vp*ey;}
+                }
+            }
+            if(!hit) break;
+        }
+        nx=Math.min(offX+cSz*mazeCols-rPx,Math.max(offX+rPx,nx));
+        ny=Math.min(offY+cSz*mazeRows-rPx,Math.max(offY+rPx,ny));
+        ball.x=nx/cW; ball.y=ny/cH;
+    }
+    // 終點判定
+    const gx=offX+(mazeCols-1)*cSz+cSz*0.5,gy=offY+(mazeRows-1)*cSz+cSz*0.5;
+    if(!goalDone&&Math.hypot(ball.x*cW-gx,ball.y*cH-gy)<cSz*0.45){goalDone=true;onWin();}
+
+    debug.innerHTML=`🎮 X:${tiltX.toFixed(1)}° Y:${tiltY.toFixed(1)}°<br>🧭 方位:${heading.toFixed(0)}° | ${currentLevel}/${MAX_LEVELS} (${mazeRows}×${mazeCols})`;
+}
+
+// ─── 過關 ─────────────────────────────────────────────────────────────────────
+function onWin(){
+    if(currentLevel>=MAX_LEVELS){
+        playClear(); launchFireworks();
+        setTimeout(()=>clearOverlay.classList.add('show'),900);
+    }else{
+        playWin();
+        const nt=getTier(currentLevel+1),ct=getTier(currentLevel);
+        winMsg.textContent=`第 ${currentLevel} 關完成！🎊`;
+        winHint.textContent=nt.rows!==ct.rows
+            ?`⬆️ 下一關進入「${nt.label}」(${nt.rows}×${nt.cols}，球更小)`
+            :`還有 ${MAX_LEVELS-currentLevel} 關！加油 💪`;
+        winOverlay.classList.add('show');
+    }
+}
+nextBtn.addEventListener('click',()=>{
+    const prev=getTier(currentLevel);
+    winOverlay.classList.remove('show');
+    currentLevel++;
+    const next=getTier(currentLevel);
+    initLevel();
+    if(next.rows!==prev.rows) showBanner(`${next.label}\n${next.rows}×${next.cols} 迷宮`);
+});
+restartBtn.addEventListener('click',()=>{
+    clearOverlay.classList.remove('show');
+    currentLevel=1; initLevel();
+    showBanner(`${getTier(1).label}\n12×12 迷宮`);
+});
+
+// ─── 繪製 ─────────────────────────────────────────────────────────────────────
+function draw(){
+    ctx.clearRect(0,0,cW,cH);
+    if(!vWalls.length) return;
+    const t=getTier(currentLevel);
+    const rPx=Math.min(cW,cH)*ball.radius;
+    const gox=offX+(mazeCols-1)*cSz, goy=offY+(mazeRows-1)*cSz;
+    const gcx=gox+cSz*0.5, gcy=goy+cSz*0.5;
+
+    // 終點光暈
+    const grd=ctx.createRadialGradient(gcx,gcy,0,gcx,gcy,cSz*0.75);
+    grd.addColorStop(0,'rgba(250,204,21,0.6)');grd.addColorStop(1,'rgba(250,204,21,0)');
+    ctx.fillStyle=grd;ctx.beginPath();ctx.arc(gcx,gcy,cSz*0.75,0,Math.PI*2);ctx.fill();
+
+    // 旗幟
+    ctx.font=`${Math.max(10,cSz*0.5)}px serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('🏁',gcx,gcy);
+
+    // 出口小門
+    const dw=cSz*0.52,dx=gox+(cSz-dw)/2,dy=goy+cSz-rPx*0.4;
+    ctx.strokeStyle='#fde047';ctx.lineWidth=Math.max(2.5,cSz*0.07);
+    ctx.shadowColor='#fde047';ctx.shadowBlur=14;ctx.beginPath();
+    ctx.moveTo(dx,dy+rPx*0.4);ctx.lineTo(dx,dy-cSz*0.3);
+    ctx.arc(dx+dw/2,dy-cSz*0.3,dw/2,Math.PI,0,false);
+    ctx.lineTo(dx+dw,dy+rPx*0.4);ctx.stroke();
+    ctx.shadowBlur=0;ctx.shadowColor='transparent';
+
+    // 牆壁
+    ctx.strokeStyle=t.wallColor;ctx.lineWidth=Math.max(1.5,cSz*0.072);
+    ctx.shadowColor='rgba(0,0,0,0.35)';ctx.shadowBlur=3;ctx.lineCap='round';
+    ctx.beginPath();
+    for(const sg of wallSegs){ctx.moveTo(sg.x1,sg.y1);ctx.lineTo(sg.x2,sg.y2);}
+    ctx.stroke();ctx.shadowBlur=0;
+
+    // 小球
+    const bx=ball.x*cW, by=ball.y*cH;
+    ctx.shadowColor=t.glow;ctx.shadowBlur=Math.max(14,rPx*2.2);
+    ctx.beginPath();ctx.arc(bx,by,rPx,0,Math.PI*2);ctx.fillStyle=t.ballColor;ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.beginPath();ctx.arc(bx-rPx*0.18,by-rPx*0.18,rPx*0.32,0,Math.PI*2);
+    ctx.fillStyle='rgba(255,255,255,0.5)';ctx.fill();
+    ctx.shadowColor='transparent';
+}
+
+// ─── 動畫 ─────────────────────────────────────────────────────────────────────
+function tick(){
+    applyCompassRotation();
+    physics();
+    tickFireworks();
+    draw();
+    requestAnimationFrame(tick);
+}
+tick();
+
+// ─── 裝置方向感測器 ───────────────────────────────────────────────────────────
+function onOrient(e){
+    // 傾斜（物理）
+    tiltX=e.gamma??0;
+    tiltY=Math.min(90,Math.max(-90,e.beta??0));
+
+    // 指北針 heading
+    // iOS: webkitCompassHeading (0=北，順時針)
+    // Android: alpha (0=北，逆時針) → 需轉換
+    let h=null;
+    if(e.webkitCompassHeading!=null){
+        h=e.webkitCompassHeading;                       // iOS，已是 0=北順時針
+    } else if(e.alpha!=null){
+        h=(360-e.alpha)%360;                            // Android: alpha 是逆時針，取反
+    }
+    if(h!==null) rawHeading=h;
+}
+
+// ─── 相機啟動 ─────────────────────────────────────────────────────────────────
+async function startCamera(){
+    try{video.srcObject=await navigator.mediaDevices.getUserMedia({video:{facingMode:{exact:'environment'}}});}
+    catch{try{video.srcObject=await navigator.mediaDevices.getUserMedia({video:true});}
+          catch(e){debug.innerHTML='❌ 相機:'+e.message;}}
+}
+
+// ─── 感測器啟動 ───────────────────────────────────────────────────────────────
+function startSensors(){
+    const go=()=>{
+        window.addEventListener('deviceorientation',onOrient,true);
+        sensorsOn=true;
+        debug.innerHTML='🎯 傾斜 + 🧭 指北針已啟動！';
+    };
+    if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'){
+        DeviceOrientationEvent.requestPermission()
+            .then(s=>{if(s==='granted')go();else debug.innerHTML='⛔ 體感權限遭拒';})
+            .catch(console.error);
+    } else go();
+}
+
+startBtn.addEventListener('click',async()=>{
+    ensureAudio(); await startCamera(); startSensors();
+    startBtn.style.opacity='0.6'; startBtn.disabled=true;
+    showBanner(`${getTier(1).label}\n12×12 迷宮`);
+});
+document.body.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+
+// ─── 啟動 ─────────────────────────────────────────────────────────────────────
+initLevel(); resize();
+
+})();
+</script>
+</body>
+</html>
