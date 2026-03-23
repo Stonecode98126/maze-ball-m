@@ -269,41 +269,6 @@ function beep(notes,vol=0.3,type='sine',gap=0.12){
 function playWin()  {beep([523.25,659.25,783.99,1046.50]);}
 function playClear(){beep([523.25,587.33,659.25,698.46,783.99,880,987.77,1046.50],0.25,'triangle',0.1);}
 
-// ── 碰撞音效（速度越快聲音越硬越響）──────────────────────────────────────────
-// impact: 0~1，撞擊強度
-function playBump(impact){
-    ensureAudio();
-    // 用 BiquadFilter 做「咚」的低頻撞擊感
-    const buf=actx.createBuffer(1,actx.sampleRate*0.08,actx.sampleRate);
-    const data=buf.getChannelData(0);
-    // 填入衰減白噪音（模擬碰撞衝擊）
-    for(let i=0;i<data.length;i++){
-        data[i]=(Math.random()*2-1)*Math.pow(1-i/data.length,2.5);
-    }
-    const src=actx.createBufferSource();
-    src.buffer=buf;
-    // 低通濾波：impact 越大截止頻率越高（更清脆）
-    const filt=actx.createBiquadFilter();
-    filt.type='lowpass';
-    filt.frequency.value=300+impact*2200;   // 300Hz（悶） ~ 2500Hz（清脆）
-    filt.Q.value=1.2;
-    // 音量隨 impact 放大
-    const gain=actx.createGain();
-    gain.gain.value=0.15+impact*0.55;       // 0.15（輕）~ 0.7（重）
-    src.connect(filt); filt.connect(gain); gain.connect(actx.destination);
-    src.start(); src.stop(actx.currentTime+0.08);
-}
-
-// ── 馬達震動（需使用者手勢後才有效）─────────────────────────────────────────
-function vibrateBump(impact){
-    if(!navigator.vibrate) return;
-    // impact 0~1 → 震動 8~40ms
-    const ms=Math.round(8+impact*32);
-    navigator.vibrate(ms);
-}
-
-
-
 // ─── 迷宮生成（DFS 回溯）──────────────────────────────────────────────────────
 function buildMaze(rows,cols){
     const V=Array(rows).fill().map(()=>Array(cols+1).fill(true));
@@ -423,16 +388,6 @@ function physics(){
 
     const rPx=Math.min(cW,cH)*ball.radius;
     const dt=1/SUBS;
-
-    // ── 碰撞音效門檻（每幀只判斷一次）──────────────────────────────────────
-    // 以碰撞前的真實速度大小為準：
-    //   THRESHOLD = 3個球直徑 / 秒，換算到每幀單位
-    //   = 3 × (2×radius) × (1/60)  ← 相對座標/幀
-    const DIAM = ball.radius * 2;
-    const THRESHOLD = DIAM * 3 / 60;          // ~3球直徑/秒
-    const spdBefore = Math.hypot(ball.vx, ball.vy); // 碰撞前速度（相對單位/幀）
-    let bumpFiredThisFrame = false;             // 本幀只觸發一次
-
     for(let s=0;s<SUBS;s++){
         let nx=ball.x*cW+ball.vx*cW*dt, ny=ball.y*cH+ball.vy*cH*dt;
         for(let it=0;it<3;it++){
@@ -445,19 +400,7 @@ function physics(){
                     if(el<1e-6){ex=1;ey=0;}else{ex/=el;ey/=el;}
                     nx+=ex*(rPx-dist);ny+=ey*(rPx-dist);
                     const vp=ball.vx*ex+ball.vy*ey;
-                    if(vp<0){
-                        ball.vx-=(1+BOUNCE)*vp*ex;ball.vy-=(1+BOUNCE)*vp*ey;
-
-                        // ── 碰撞回饋：用碰前速度判斷，本幀只響一次 ────────
-                        if(!bumpFiredThisFrame && sensorsOn && spdBefore > THRESHOLD){
-                            bumpFiredThisFrame = true;
-                            // impact 0~1：門檻到最大速度線性插值
-                            const impact = Math.min(1, (spdBefore - THRESHOLD) / (MSPD - THRESHOLD + 1e-9));
-                            playBump(impact);
-                            vibrateBump(impact);
-                        }
-                        // ──────────────────────────────────────────────────────
-                    }
+                    if(vp<0){ball.vx-=(1+BOUNCE)*vp*ex;ball.vy-=(1+BOUNCE)*vp*ey;}
                 }
             }
             if(!hit) break;
