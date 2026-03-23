@@ -302,9 +302,7 @@ function vibrateBump(impact){
     navigator.vibrate(ms);
 }
 
-// ── 碰撞冷卻（防止同幀連觸多牆爆音）─────────────────────────────────────────
-let lastBumpTime=0;
-const BUMP_COOLDOWN=80; // ms，同一次衝撞只響一聲
+
 
 // ─── 迷宮生成（DFS 回溯）──────────────────────────────────────────────────────
 function buildMaze(rows,cols){
@@ -425,6 +423,16 @@ function physics(){
 
     const rPx=Math.min(cW,cH)*ball.radius;
     const dt=1/SUBS;
+
+    // ── 碰撞音效門檻（每幀只判斷一次）──────────────────────────────────────
+    // 以碰撞前的真實速度大小為準：
+    //   THRESHOLD = 3個球直徑 / 秒，換算到每幀單位
+    //   = 3 × (2×radius) × (1/60)  ← 相對座標/幀
+    const DIAM = ball.radius * 2;
+    const THRESHOLD = DIAM * 3 / 60;          // ~3球直徑/秒
+    const spdBefore = Math.hypot(ball.vx, ball.vy); // 碰撞前速度（相對單位/幀）
+    let bumpFiredThisFrame = false;             // 本幀只觸發一次
+
     for(let s=0;s<SUBS;s++){
         let nx=ball.x*cW+ball.vx*cW*dt, ny=ball.y*cH+ball.vy*cH*dt;
         for(let it=0;it<3;it++){
@@ -440,25 +448,15 @@ function physics(){
                     if(vp<0){
                         ball.vx-=(1+BOUNCE)*vp*ex;ball.vy-=(1+BOUNCE)*vp*ey;
 
-                        // ── 碰撞音效 + 震動門檻 ──────────────────────────────
-                        // 速度門檻：|vp| 需 > 3個球直徑 / 秒 的等效速度
-                        // MAX_SPEED 對應畫面比例速度，1個球直徑 = 2*radius（相對單位）
-                        // 3個直徑門檻 = 3 * 2 * ball.radius = 6 * radius
-                        // 換算到相對座標系：vp 已是相對單位/幀，乘以 60fps 轉/秒
-                        const vpAbs=Math.abs(vp);
-                        const DIAM=ball.radius*2;           // 1個球直徑（相對單位）
-                        const THRESHOLD=DIAM*3/60;          // 3個直徑/秒 → /幀
-                        if(vpAbs>THRESHOLD&&sensorsOn){
-                            const now=performance.now();
-                            if(now-lastBumpTime>BUMP_COOLDOWN){
-                                lastBumpTime=now;
-                                // impact 0~1：從門檻到最大速度的線性插值
-                                const impact=Math.min(1,(vpAbs-THRESHOLD)/(MSPD-THRESHOLD+1e-9));
-                                playBump(impact);
-                                vibrateBump(impact);
-                            }
+                        // ── 碰撞回饋：用碰前速度判斷，本幀只響一次 ────────
+                        if(!bumpFiredThisFrame && sensorsOn && spdBefore > THRESHOLD){
+                            bumpFiredThisFrame = true;
+                            // impact 0~1：門檻到最大速度線性插值
+                            const impact = Math.min(1, (spdBefore - THRESHOLD) / (MSPD - THRESHOLD + 1e-9));
+                            playBump(impact);
+                            vibrateBump(impact);
                         }
-                        // ─────────────────────────────────────────────────────
+                        // ──────────────────────────────────────────────────────
                     }
                 }
             }
